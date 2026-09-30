@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>貪吃蛇：多模式版</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f172a;color:#f8fafc;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;place-items:center}
+.app{width:min(94vw,680px);padding:18px}
+h1{text-align:center;margin:0 0 14px;font-size:34px}
+.panel{background:#111827;border:1px solid #334155;border-radius:18px;padding:18px;box-shadow:0 18px 50px #0006}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+button,select{font:inherit;border:0;border-radius:11px;padding:11px 15px;background:#334155;color:white;cursor:pointer}
+button:hover{filter:brightness(1.15)}
+.primary{background:#2563eb}
+.danger{background:#b91c1c}
+.menu-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
+.mode{padding:15px;text-align:left;background:#1e293b;border:1px solid #475569}
+.mode b{display:block;font-size:18px;margin-bottom:4px}
+.mode small{color:#94a3b8}
+.mode.active{outline:2px solid #60a5fa;background:#172554}
+.settings{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin:12px 0}
+.hidden{display:none!important}
+.hud{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px}
+.stats{font-size:16px}
+canvas{display:block;width:100%;aspect-ratio:1;background:#07101f;border:2px solid #334155;border-radius:15px}
+.hint{text-align:center;color:#94a3b8;font-size:13px;margin:10px 0}
+.pad{display:grid;grid-template-columns:62px 62px 62px;gap:7px;width:max-content;margin:10px auto 0}
+.pad button{width:62px;height:45px;padding:0;background:#334155;font-size:20px}
+.empty{visibility:hidden}
+.overlay{position:relative}
+.message{position:absolute;inset:0;display:grid;place-items:center;text-align:center;background:#0009;border-radius:15px}
+.message>div{background:#111827dd;padding:22px;border-radius:16px}
+.message h2{margin:0 0 8px}
+@media(max-width:500px){.menu-grid{grid-template-columns:1fr}h1{font-size:29px}.app{padding:10px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🐍 貪吃蛇：多模式版</h1>
+
+  <section id="menu" class="panel">
+    <h2>選擇模式</h2>
+    <div class="menu-grid">
+      <button class="mode active" data-mode="classic"><b>經典</b><small>撞牆或自己就結束</small></button>
+      <button class="mode" data-mode="wrap"><b>穿牆</b><small>從一側出去會從另一側出現</small></button>
+      <button class="mode" data-mode="timed"><b>限時 60 秒</b><small>時間內吃得越多越高分</small></button>
+      <button class="mode" data-mode="obstacle"><b>障礙</b><small>地圖中有固定障礙物</small></button>
+      <button class="mode" data-mode="speed"><b>加速</b><small>每吃一個食物速度更快</small></button>
+      <button class="mode" data-mode="survival"><b>生存</b><small>障礙與速度逐漸增加</small></button>
+    </div>
+    <div class="settings">
+      <label>難度：
+        <select id="difficulty">
+          <option value="easy">簡單</option>
+          <option value="normal" selected>普通</option>
+          <option value="hard">困難</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <button id="start" class="primary">開始遊戲</button>
+    </div>
+    <p class="hint">方向鍵 / WASD 控制　·　空白鍵暫停　·　Enter 重開</p>
+  </section>
+
+  <section id="gamePanel" class="panel hidden">
+    <div class="hud">
+      <div class="stats">分數 <b id="score">0</b>　最高 <b id="high">0</b></div>
+      <div class="stats" id="timeBox"></div>
+      <div class="row">
+        <button id="pause">暫停</button>
+        <button id="back">選模式</button>
+      </div>
+    </div>
+    <div class="overlay">
+      <canvas id="game" width="600" height="600"></canvas>
+      <div id="overlay" class="message hidden">
+        <div>
+          <h2 id="msgTitle"></h2>
+          <p id="msgText"></p>
+          <button id="msgButton" class="primary">重新開始</button>
+        </div>
+      </div>
+    </div>
+    <div class="hint">方向鍵 / WASD　·　空白鍵暫停　·　Enter重新開始</div>
+    <div class="pad">
+      <button class="empty"></button><button data-dir="up">▲</button><button class="empty"></button>
+      <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const N=24,CELL=canvas.width/N;
+let mode="classic",difficulty="normal",snake,dir,nextDir,food,score,high,gameOver,paused,timer,clock,seconds,obstacles=[];
+const speeds={easy:145,normal:105,hard:78};
+const modeNames={classic:"經典",wrap:"穿牆",timed:"限時",obstacle:"障礙",speed:"加速",survival:"生存"};
+
+function chooseMode(m){
+  mode=m;
+  document.querySelectorAll(".mode").forEach(b=>b.classList.toggle("active",b.dataset.mode===m));
+}
+document.querySelectorAll(".mode").forEach(b=>b.onclick=()=>chooseMode(b.dataset.mode));
+document.getElementById("difficulty").onchange=e=>difficulty=e.target.value;
+
+function reset(){
+  snake=[{x:12,y:12},{x:11,y:12},{x:10,y:12}];
+  dir={x:1,y:0};nextDir={...dir};score=0;gameOver=false;paused=false;seconds=60;
+  obstacles=[];
+  if(mode==="obstacle"||mode==="survival") makeObstacles(mode==="survival"?18:12);
+  placeFood();updateHUD();hideOverlay();
+  clearInterval(timer);clearInterval(clock);
+  timer=setInterval(step,currentSpeed());
+  if(mode==="timed"){clock=setInterval(()=>{if(!paused&&!gameOver){seconds--;updateHUD();if(seconds<=0)finish("時間到！","你的最終分數："+score)}},1000)}
+  draw();
+}
+function currentSpeed(){
+  let s=speeds[difficulty];
+  if(mode==="speed") s=Math.max(42,s-score*4);
+  if(mode==="survival") s=Math.max(42,s-Math.floor(score/3)*6);
+  return s;
+}
+function restartTimer(){
+  clearInterval(timer);
+  if(!gameOver)timer=setInterval(step,currentSpeed());
+}
+function makeObstacles(count){
+  let tries=0;
+  while(obstacles.length<count&&tries++<1000){
+    const p={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)};
+    if((Math.abs(p.x-12)+Math.abs(p.y-12)<5)||snake.some(s=>s.x===p.x&&s.y===p.y)||obstacles.some(o=>o.x===p.x&&o.y===p.y))continue;
+    obstacles.push(p);
+  }
+}
+function setDir(name){
+  const d={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}}[name];
+  if(!d|| (d.x===-dir.x&&d.y===-dir.y))return;
+  nextDir=d;
+}
+function step(){
+  if(gameOver||paused)return;
+  dir=nextDir;
+  let head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+  if(mode==="wrap"){
+    head.x=(head.x+N)%N;head.y=(head.y+N)%N;
+  }else if(head.x<0||head.x>=N||head.y<0||head.y>=N){finish("撞牆了！","分數："+score);return}
+  const bodyHit=snake.some((s,i)=>i>0&&s.x===head.x&&s.y===head.y);
+  const wallHit=obstacles.some(o=>o.x===head.x&&o.y===head.y);
+  if(bodyHit||wallHit){finish(wallHit?"撞到障礙物！":"撞到自己了！","分數："+score);return}
+  snake.unshift(head);
+  if(head.x===food.x&&head.y===food.y){
+    score++;
+    high=Math.max(high,score);localStorage.setItem("snakeHigh_"+mode,high);
+    placeFood();updateHUD();
+    if(mode==="speed"||mode==="survival")restartTimer();
+    if(mode==="survival"&&score%4===0){makeObstacles(2);draw();}
+  }else snake.pop();
+  draw();
+}
+function placeFood(){
+  let tries=0;
+  do{food={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)};tries++}
+  while((snake.some(s=>s.x===food.x&&s.y===food.y)||obstacles.some(o=>o.x===food.x&&o.y===food.y))&&tries<1000);
+}
+function updateHUD(){
+  document.getElementById("score").textContent=score;
+  high=Number(localStorage.getItem("snakeHigh_"+mode)||0);
+  document.getElementById("high").textContent=high;
+  document.getElementById("timeBox").textContent=mode==="timed"?"⏱ "+seconds+"s":"";
+}
+function draw(){
+  ctx.fillStyle="#07101f";ctx.fillRect(0,0,600,600);
+  ctx.strokeStyle="#ffffff08";
+  for(let i=1;i<N;i++){ctx.beginPath();ctx.moveTo(i*CELL,0);ctx.lineTo(i*CELL,600);ctx.stroke();ctx.beginPath();ctx.moveTo(0,i*CELL);ctx.lineTo(600,i*CELL);ctx.stroke()}
+  obstacles.forEach(o=>{ctx.fillStyle="#64748b";roundRect(o.x*CELL+3,o.y*CELL+3,CELL-6,CELL-6,6);ctx.fill()});
+  ctx.fillStyle="#f43f5e";ctx.beginPath();ctx.arc(food.x*CELL+CELL/2,food.y*CELL+CELL/2,CELL*.3,0,Math.PI*2);ctx.fill();
+  snake.forEach((s,i)=>{ctx.fillStyle=i===0?"#34d399":"#10b981";roundRect(s.x*CELL+2,s.y*CELL+2,CELL-4,CELL-4,6);ctx.fill()});
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function finish(title,text){
+  gameOver=true;clearInterval(timer);clearInterval(clock);
+  document.getElementById("msgTitle").textContent=title;
+  document.getElementById("msgText").textContent=text+"　模式："+modeNames[mode];
+  document.getElementById("msgButton").textContent="再玩一次";
+  document.getElementById("overlay").classList.remove("hidden");
+}
+function togglePause(){
+  if(gameOver)return;
+  paused=!paused;
+  document.getElementById("pause").textContent=paused?"繼續":"暫停";
+  document.getElementById("msgTitle").textContent="遊戲暫停";
+  document.getElementById("msgText").textContent="按空白鍵或「繼續」回到遊戲";
+  document.getElementById("msgButton").textContent="繼續";
+  document.getElementById("overlay").classList.toggle("hidden",!paused);
+}
+function hideOverlay(){document.getElementById("overlay").classList.add("hidden")}
+document.getElementById("start").onclick=()=>{difficulty=document.getElementById("difficulty").value;document.getElementById("menu").classList.add("hidden");document.getElementById("gamePanel").classList.remove("hidden");reset()};
+document.getElementById("pause").onclick=togglePause;
+document.getElementById("back").onclick=()=>{clearInterval(timer);clearInterval(clock);document.getElementById("gamePanel").classList.add("hidden");document.getElementById("menu").classList.remove("hidden")};
+document.getElementById("msgButton").onclick=()=>{if(paused){togglePause()}else reset()};
+document.addEventListener("keydown",e=>{
+  const map={ArrowUp:"up",ArrowDown:"down",ArrowLeft:"left",ArrowRight:"right",w:"up",s:"down",a:"left",d:"right",W:"up",S:"down",A:"left",D:"right"};
+  if(map[e.key]){e.preventDefault();setDir(map[e.key])}
+  if(e.code==="Space"){e.preventDefault();togglePause()}
+  if(e.key==="Enter"&&gameOver)reset();
+});
+document.querySelectorAll("[data-dir]").forEach(b=>b.onclick=()=>setDir(b.dataset.dir));
+</script>
+</body>
+</html>
